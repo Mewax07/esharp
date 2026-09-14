@@ -50,15 +50,70 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, String> {
+        self.parse_add_sub()
+    }
+
+    fn parse_add_sub(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_mul_div()?;
+        loop {
+            match self.peek() {
+                Token::Plus => {
+                    self.advance();
+                    let right = self.parse_mul_div()?;
+                    left = Expr::add(left, right);
+                }
+                Token::Minus => {
+                    self.advance();
+                    let right = self.parse_mul_div()?;
+                    left = Expr::sub(left, right);
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_mul_div(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_unary()?;
+        Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, String> {
+        if self.peek() == &Token::Minus {
+            self.advance();
+            let e = self.parse_unary()?;
+            return Ok(Expr::neg(e));
+        }
+        if self.peek() == &Token::Plus {
+            self.advance();
+            return self.parse_unary();
+        }
         self.parse_primary()
     }
 
     fn parse_primary(&mut self) -> Result<Expr, String> {
-        let e = self.advance();
-        eprintln!("{:?}", e);
-        // match self.advance() {
-        match e {
+        match self.advance() {
             Token::Num(n) => Ok(Expr::Num(n)),
+            Token::Ident(name) => {
+                if self.peek() == &Token::LParen {
+                    self.advance(); // '('
+                    let mut args = Vec::new();
+                    if self.peek() != &Token::RParen {
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if self.peek() == &Token::Comma {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Var(name))
+                }
+            }
             other => Err(format!("Token unexpected : {:?}", other)),
         }
     }
