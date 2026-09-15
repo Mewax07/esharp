@@ -1,3 +1,5 @@
+use std::fmt::{self, Display, Formatter};
+
 use crate::utils::decimal::Dec;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,7 +28,40 @@ impl Expr {
         Expr::Sub(Box::new(a), Box::new(b))
     }
 
+    pub fn mul(a: Expr, b: Expr) -> Expr {
+        Expr::Mul(Box::new(a), Box::new(b))
+    }
+
+    pub fn div(a: Expr, b: Expr) -> Expr {
+        Expr::Div(Box::new(a), Box::new(b))
+    }
+
     pub fn neg(a: Expr) -> Expr {
         Expr::Neg(Box::new(a))
+    }
+}
+
+impl Display for Expr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Num(n) => write!(f, "{}", n),
+            Expr::Var(s) => write!(f, "{}", s),
+            Expr::Add(a, b) => write!(f, "({} + {})", a, b),
+            Expr::Sub(a, b) => write!(f, "({} - {})", a, b),
+            Expr::Mul(a, b) => write!(f, "({} * {})", a, b),
+            Expr::Div(a, b) => write!(f, "({} / {})", a, b),
+            Expr::Pow(a, b) => write!(f, "({} ^ {})", a, b),
+            Expr::Neg(a) => write!(f, "-{}", a),
+            Expr::Call(name, args) => {
+                write!(f, "{}(", name)?;
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", a)?;
+                }
+                write!(f, ")")
+            }
+        }
     }
 }

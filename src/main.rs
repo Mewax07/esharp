@@ -1,10 +1,6 @@
 use std::io::{Write, stdin, stdout};
 
-use crate::parser::{
-    ast::Expr,
-    eval::{Environment, eval},
-    parser::{Stmt, parse_stmt},
-};
+use crate::parser::{eval::Environment, repl::{LineResult, process_line}};
 
 pub(crate) mod parser;
 pub(crate) mod utils;
@@ -28,24 +24,10 @@ fn main() {
             break;
         }
 
-        if let Err(e) = handle_line(line, &mut env) {
-            println!("Error: {}", e)
+        match process_line(line, &mut env) {
+            Ok(LineResult::Value(v)) => println!("{}", v),
+            Ok(LineResult::Symbolic(e)) => println!("{}", e),
+            Err(e) => println!("Erreur : {}", e),
         }
     }
-}
-
-fn handle_line(line: &str, env: &mut Environment) -> Result<(), String> {
-    let stmt = parse_stmt(line)?;
-
-    match stmt {
-        Stmt::Eval(expr) => handle_expr(&expr, env)?,
-    }
-
-    Ok(())
-}
-
-fn handle_expr(expr: &Expr, env: &Environment) -> Result<(), String> {
-    let value = eval(expr, env)?;
-    println!("{:?}", value);
-    Ok(())
 }

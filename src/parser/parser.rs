@@ -75,6 +75,21 @@ impl Parser {
 
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_unary()?;
+        loop {
+            match self.peek() {
+                Token::Star => {
+                    self.advance();
+                    let right = self.parse_unary()?;
+                    left = Expr::mul(left, right);
+                }
+                Token::Slash => {
+                    self.advance();
+                    let right = self.parse_unary()?;
+                    left = Expr::div(left, right);
+                }
+                _ => break,
+            }
+        }
         Ok(left)
     }
 
@@ -113,6 +128,11 @@ impl Parser {
                 } else {
                     Ok(Expr::Var(name))
                 }
+            }
+            Token::LParen => {
+                let e = self.parse_expr()?;
+                self.expect(&Token::RParen)?;
+                Ok(e)
             }
             other => Err(format!("Token unexpected : {:?}", other)),
         }

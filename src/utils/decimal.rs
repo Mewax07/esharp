@@ -1,6 +1,5 @@
 use std::{
-    fmt::{self, Display, Formatter},
-    str::FromStr,
+    fmt::{self, Display, Formatter}, ops::{Add, Neg, Sub}, str::FromStr,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,6 +26,40 @@ impl Dec {
 
     pub fn is_zero(&self) -> bool {
         self.mantissa == 0
+    }
+
+    pub fn checked_add(self, other: Dec) -> Option<Dec> {
+        self.mantissa.checked_add(other.mantissa).map(|m| Dec { mantissa: m })
+    }
+
+    pub fn checked_sub(self, other: Dec) -> Option<Dec> {
+        self.mantissa.checked_sub(other.mantissa).map(|m| Dec { mantissa: m })
+    }
+}
+
+impl Neg for Dec {
+    type Output = Dec;
+
+    fn neg(self) -> Self::Output {
+        Dec {
+            mantissa: -self.mantissa,
+        }
+    }
+}
+
+impl Add for Dec {
+    type Output = Dec;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.checked_add(rhs).expect("Overflow in addition")
+    }
+}
+
+impl Sub for Dec {
+    type Output = Dec;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.checked_sub(rhs).expect("Overflow in substraction")
     }
 }
 
