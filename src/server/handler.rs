@@ -1,53 +1,24 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    net::TcpStream,
+use std::collections::HashMap;
+
+use crate::{
+    html,
+    math::{
+        Evaluator, Renderer,
+        ast::{Calculation, Expr},
+        lexer::Lexer,
+        parser::Parser,
+    },
+    server::{Document, Method, Request, Response},
 };
 
-use crate::math::{
-    Evaluator, Renderer,
-    ast::{Calculation, Expr},
-    lexer::Lexer,
-    parser::Parser,
-};
-
-pub fn handle_request(mut stream: TcpStream) {
-    let mut buffer = [0; 1024 * 4];
-    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-    if bytes_read == 0 {
-        return;
+pub fn handle_request(request: Request) -> Response {
+    match (&request.method, request.path.as_str()) {
+        (Method::Get, "/") => handle_index(),
+        (Method::Post, "/calculate") => handle_calculate(&request),
+        (Method::Post, "/api/calculate") => handle_api_calculate(&request),
+        (_, "/") => Response::method_not_allowed().allow("GET"),
+        _ => Response::not_found(),
     }
-
-    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-    let path = if let Some(first_line) = request.lines().next() {
-        first_line.split_whitespace().nth(1).unwrap_or("/")
-    } else {
-        "/"
-    };
-
-    let (path, query_params) = if let Some(query_start) = path.find('?') {
-        let (base_path, query) = path.split_at(query_start);
-        let params = parse_query_params(query);
-        (base_path, params)
-    } else {
-        (path, HashMap::new())
-    };
-
-    let body = if request.contains("\r\n\r\n") {
-        let body_start = request.find("\r\n\r\n").unwrap() + 4;
-        &request[body_start..]
-    } else {
-        ""
-    };
-
-    let response = match (path, query_params, body) {
-        ("/calculate", _, body) if !body.is_empty() => handle_calculate(body),
-        ("/api/calculate", _, body) if !body.is_empty() => handle_api_calculate(body),
-        _ => handle_404(),
-    };
-
-    stream.write_all(&response).unwrap();
-    stream.flush().unwrap();
 }
 
 fn parse_query_params(query: &str) -> HashMap<String, String> {
@@ -62,116 +33,107 @@ fn parse_query_params(query: &str) -> HashMap<String, String> {
     params
 }
 
-fn handle_calculate(body: &str) -> Vec<u8> {
-    let expression = if let Some(expr_start) = body.find("expression=") {
-        let expr = &body[expr_start + 10..];
-        let expr = expr.split('&').next().unwrap_or("");
-        let expr = expr.replace("+", " ");
-        url_decode(&expr)
-    } else {
-        body.to_string()
-    };
+fn handle_index() -> Response {
+    let page = Document::new()
+        .lang("fr")
+        .title("ESharp")
+        .body(
+            html!("main")
+                .class("container")
+                .append(html!("h1").text_content("ESharp"))
+                .append(html!("p").text_content("Un moteur mathématique écrit en Rust."))
+                .append(
+                    html!("form")
+                        .action("/calculate")
+                        .method("POST")
+                        .append(
+                            html!("input")
+                                .r#type("text")
+                                .name("expression")
+                                .placeholder("2 + 5")
+                                .self_closing(),
+                        )
+                        .append(html!("button").r#type("submit").text_content("Calculer")),
+                ),
+        )
+        .render();
 
-    let mut calculation = Calculation::new(&expression);
+    Response::html(page)
+}
+
+fn handle_calculate(request: &Request) -> Response {
+    let expression = extract_expression(request);
 
     let mut lexer = Lexer::new(&expression);
     let tokens = lexer.tokenize();
 
     let mut parser = Parser::new(tokens);
-    if let Some(ast) = parser.parse() {
-        calculation = calculation.with_ast(ast);
 
-        let evaluator = Evaluator::new();
-        let mut calc_with_steps = calculation.clone();
-        if let Err(e) = evaluator.eval_calculation(&mut calc_with_steps) {
-            return format!(
-                "<!DOCTYPE html>\n<html>\n<body>\n\t<h1>Erreur</h1>\n\t<p>{}</p>\n\t<p>Expression: {}</p>\n</body>\n</html>",
-                e, expression
-            ).into_bytes();
-        }
-
-        let renderer = Renderer::new();
-        let html = renderer.render_full_page(&calc_with_steps);
-        let response = format!(
-            "HTTP/1.1 200 OK\r\n\
-             Content-Type: text/html; charset=utf-8\r\n\
-             Content-Length: {}\r\n\
-             Connection: close\r\n\
-             \r\n\
-             {}",
-            html.len(),
-            html
-        );
-
-        return response.into_bytes();
-    }
-
-    format!(
-        "<!DOCTYPE html>\n<html>\n<body>\n\t<h1>Erreur de parsing</h1>\n\t<p>Impossible de parser l'expression: {}</p>\n</body>\n</html>",
-        expression
-    ).into_bytes()
-}
-
-fn handle_api_calculate(body: &str) -> Vec<u8> {
-    let expression = if let Some(expr_start) = body.find("expression=") {
-        let expr = &body[expr_start + 10..];
-        let expr = expr.split('&').next().unwrap_or("");
-        url_decode(expr)
-    } else {
-        body.to_string()
+    let Some(ast) = parser.parse() else {
+        return Response::bad_request(format!("Impossible de parser : {}", expression));
     };
 
-    let mut calculation = Calculation::new(&expression);
+    let mut calculation = Calculation::new(&expression).with_ast(ast);
+
+    let evaluator = Evaluator::new();
+
+    if let Err(error) = evaluator.eval_calculation(&mut calculation) {
+        return Response::bad_request(error.to_string());
+    }
+
+    let renderer = Renderer::new();
+
+    Response::html(renderer.render_full_page(&calculation))
+}
+
+fn handle_api_calculate(request: &Request) -> Response {
+    let expression = extract_expression(request);
 
     let mut lexer = Lexer::new(&expression);
     let tokens = lexer.tokenize();
 
     let mut parser = Parser::new(tokens);
-    if let Some(ast) = parser.parse() {
-        calculation = calculation.with_ast(ast);
 
-        let evaluator = Evaluator::new();
-        if let Ok(_) = evaluator.eval_calculation(&mut calculation) {
-            let json = format!(
-                "{{\"expression\": \"{}\", \"result\": \"{}\", \"ast\": \"{}\"}}",
-                calculation.expression,
-                calculation.result.unwrap_or(0.0),
-                format_ast_for_json(&calculation.ast.unwrap()),
-            );
+    let Some(ast) = parser.parse() else {
+        return Response::json("{\"error\":\"Failed to parse expression\"}")
+            .status(crate::server::StatusCode::BadRequest);
+    };
 
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                json.len(),
-                json
-            );
+    let mut calculation = Calculation::new(&expression).with_ast(ast);
 
-            return response.into_bytes();
-        }
+    let evaluator = Evaluator::new();
+
+    if let Err(error) = evaluator.eval_calculation(&mut calculation) {
+        return Response::json(format!("{{\"error\":\"{}\"}}", error))
+            .status(crate::server::StatusCode::BadRequest);
     }
 
-    let error_json = format!(
-        "{{\"error\": \"Failed to parse or evaluate expression: {}\"}}",
-        expression
+    let ast = calculation.ast.as_ref().unwrap();
+
+    let json = format!(
+        "{{\
+        \"expression\":\"{}\",\
+        \"result\":{},\
+        \"ast\":\"{}\"\
+        }}",
+        calculation.expression,
+        calculation.result.unwrap_or(0.0),
+        format_ast_for_json(ast),
     );
 
-    let response = format!(
-        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        error_json.len(),
-        error_json
-    );
-
-    response.into_bytes()
+    Response::json(json)
 }
 
-fn handle_404() -> Vec<u8> {
-    let html = "<!DOCTYPE html>\n<html>\n<body>\n\t<h1>404 Not Found</h1>\n\t<p>La page demandée n'existe pas.</p>\n</body>\n</html>";
+fn extract_expression(request: &Request) -> String {
+    if let Some(expression) = request.query.get("expression") {
+        return expression.clone();
+    }
 
-    format!(
-        "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
-        html.len(),
-        html
-    )
-    .into_bytes()
+    if let Some(expression) = request.body.strip_prefix("expression=") {
+        return expression.split('&').next().unwrap_or("").to_string();
+    }
+
+    request.body.clone()
 }
 
 fn url_decode(s: &str) -> String {

@@ -1,24 +1,11 @@
+pub mod document;
+pub mod html;
+pub mod macros;
 pub mod page;
+pub mod request;
 
+pub use document::*;
+pub use html::*;
+pub use macros::*;
 pub use page::*;
-
-#[derive(Debug, Clone)]
-pub struct Html {
-    tag: String,
-    attributes: Vec<(String, String)>,
-    children: Vec<Html>,
-    text: Option<String>,
-    self_closing: bool,
-}
-
-impl Html {
-    pub fn new(tag: impl Into<String>) -> Self {
-        Self {
-            tag: tag.into(),
-            attributes: Vec::new(),
-            children: Vec::new(),
-            text: None,
-            self_closing: false,
-        }
-    }
-}
+pub use request::*;

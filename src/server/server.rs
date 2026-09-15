@@ -1,6 +1,8 @@
-use std::{net::TcpListener, sync::Arc, thread};
+use std::{
+    io::{Read, Write}, net::{TcpListener, TcpStream}, thread,
+};
 
-use crate::server::handle_request;
+use crate::server::{Request, Response, handle_request};
 
 pub struct Server {
     host: String,
@@ -10,7 +12,7 @@ pub struct Server {
 impl Server {
     pub fn new() -> Self {
         Self {
-            host: "0.0.0.0".to_string(),
+            host: "127.0.0.1".to_string(),
             port: 8000,
         }
     }
@@ -27,28 +29,46 @@ impl Server {
 
     pub fn run(&self) {
         let address = format!("{}:{}", self.host, self.port);
-        let listener =
-            TcpListener::bind(&address).expect(&format!("Connection to {} failed", address));
+
+        let listener = TcpListener::bind(&address).expect("Failed to bind server");
+
+        println!("ESharp running on http://{}", address);
 
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    let stream = Arc::new(stream);
-                    thread::spawn(move || {
-                        let _stream = Arc::try_unwrap(stream).unwrap();
-                        handle_request(_stream);
+                    thread::spawn(|| {
+                        handle_connection(stream);
                     });
                 }
-                Err(e) => {
-                    eprintln!("Connection error: {e}")
+
+                Err(error) => {
+                    eprintln!("Connection error: {}", error);
                 }
             }
         }
     }
 }
 
-impl Default for Server {
-    fn default() -> Self {
-        Self::new()
-    }
+fn handle_connection(mut stream: TcpStream) {
+    let mut buffer = [0u8; 16 * 1024];
+
+    let bytes_read = match stream.read(&mut buffer) {
+        Ok(0) => return,
+        Ok(n) => n,
+        Err(_) => return,
+    };
+
+    let raw = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+    let response = match Request::parse(&raw) {
+        Some(request) => handle_request(request),
+
+        None => Response::bad_request("Invalid HTTP request"),
+    };
+
+    let bytes = response.to_bytes();
+
+    let _ = stream.write_all(&bytes);
+    let _ = stream.flush();
 }
