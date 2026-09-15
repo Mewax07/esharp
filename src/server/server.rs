@@ -1,5 +1,7 @@
 use std::{net::TcpListener, sync::Arc, thread};
 
+use crate::server::handle_request;
+
 pub struct Server {
     host: String,
     port: u16,
@@ -34,7 +36,7 @@ impl Server {
                     let stream = Arc::new(stream);
                     thread::spawn(move || {
                         let _stream = Arc::try_unwrap(stream).unwrap();
-                        // handle_request();
+                        handle_request(_stream);
                     });
                 }
                 Err(e) => {
